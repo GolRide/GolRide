@@ -49,14 +49,14 @@ function Row({
   disabled?: boolean
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 rounded-xl border px-4 py-3 bg-white">
+    <div className="flex items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white px-4 py-3">
       <div className="min-w-0">
-        <div className="text-xs text-zinc-500">{label}</div>
+        <div className="text-xs font-extrabold tracking-wide text-slate-500">{label}</div>
         {!editing ? (
-          <div className="text-sm text-zinc-900 truncate">{value || "—"}</div>
+          <div className="text-sm font-semibold text-slate-900 truncate">{value || "—"}</div>
         ) : (
           <input
-            className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none"
+            className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none"
             value={value}
             onChange={(e) => onChange?.(e.target.value)}
             disabled={disabled}
@@ -68,7 +68,7 @@ function Row({
         <button
           type="button"
           onClick={onEdit}
-          className="shrink-0 rounded-lg p-2 hover:bg-zinc-100"
+          className="shrink-0 rounded-xl border border-slate-200 bg-white p-2 text-slate-700 hover:bg-slate-50"
           title={editing ? "Editar" : "Editar"}
         >
           <IconPencil />
@@ -141,17 +141,15 @@ export default function ProfileClient({ initialUser }: { initialUser: UserDTO })
     <div className="max-w-3xl">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">Perfil</h1>
-          <p className="mt-1 text-sm text-zinc-600">
-            Edita tus datos. Todo en estilo minimalista.
-          </p>
+          <h1 className="text-2xl font-black text-slate-900">Perfil</h1>
+          <p className="mt-1 text-sm text-slate-600">Edita tus datos con el mismo estilo de registro.</p>
         </div>
 
         <button
           type="button"
           onClick={save}
           disabled={saving}
-          className="rounded-xl border px-4 py-2 text-sm hover:bg-zinc-50 disabled:opacity-60"
+          className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-extrabold text-slate-900 hover:bg-slate-50 disabled:opacity-60"
         >
           {saving ? "Guardando..." : "Guardar cambios"}
         </button>
@@ -160,21 +158,21 @@ export default function ProfileClient({ initialUser }: { initialUser: UserDTO })
       {msg && <div className="mt-4 text-sm text-zinc-700">{msg}</div>}
 
       <div className="mt-6 grid gap-4">
-        <div className="rounded-2xl border bg-white p-4">
-          <div className="text-sm font-medium">Foto de perfil</div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <div className="text-sm font-extrabold text-slate-900">Foto de perfil</div>
           <div className="mt-3 flex items-center gap-4">
-            <div className="h-16 w-16 overflow-hidden rounded-2xl border bg-zinc-50">
+            <div className="h-16 w-16 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
               {avatarPreview ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={avatarPreview} alt="avatar" className="h-full w-full object-cover" />
               ) : (
-                <div className="h-full w-full grid place-items-center text-xs text-zinc-500">
+                <div className="h-full w-full grid place-items-center text-xs text-slate-500">
                   Sin foto
                 </div>
               )}
             </div>
 
-            <label className="rounded-xl border px-3 py-2 text-sm hover:bg-zinc-50 cursor-pointer">
+            <label className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-extrabold text-slate-900 hover:bg-slate-50 cursor-pointer">
               Subir foto
               <input
                 type="file"
@@ -237,11 +235,11 @@ export default function ProfileClient({ initialUser }: { initialUser: UserDTO })
           onChange={(v) => setUser((u) => ({ ...u, phone: v }))}
         />
 
-        <div className="rounded-2xl border bg-white p-4">
-          <div className="text-xs text-zinc-500">Contraseña</div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <div className="text-xs font-extrabold tracking-wide text-slate-500">Contraseña</div>
           <div className="mt-2 flex items-center gap-2">
             <input
-              className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none"
               type={showPassword ? "text" : "password"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -249,14 +247,14 @@ export default function ProfileClient({ initialUser }: { initialUser: UserDTO })
             />
             <button
               type="button"
-              className="rounded-lg p-2 hover:bg-zinc-100"
+              className="rounded-xl border border-slate-200 bg-white p-2 text-slate-700 hover:bg-slate-50"
               onClick={() => setShowPassword((s) => !s)}
               title={showPassword ? "Ocultar" : "Mostrar"}
             >
               <IconEye open={showPassword} />
             </button>
           </div>
-          <div className="mt-2 text-xs text-zinc-500">
+          <div className="mt-2 text-xs text-slate-500">
             Nota: el cambio real de contraseña lo conectamos en el siguiente paso (bcrypt).
           </div>
         </div>
@@ -264,4 +262,3 @@ export default function ProfileClient({ initialUser }: { initialUser: UserDTO })
     </div>
   )
 }
-

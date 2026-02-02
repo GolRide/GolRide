@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { dbConnect } from "@/lib/db";
 import { Trip } from "@/models/Trip";
 import { getSession } from "@/lib/auth";
+import { buildLooseRegex } from "@/lib/search";
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -11,14 +12,23 @@ export async function GET(req: Request) {
   const destination = (searchParams.get("destination") || "").trim();
   const team = (searchParams.get("team") || "").trim();
   const dateStr = (searchParams.get("date") || "").trim();
+  const mine = searchParams.get("mine") === "1";
 
   await dbConnect();
 
   const filter: any = { active: true };
 
-  if (origin) filter.origin = new RegExp(origin, "i");
-  if (destination) filter.destination = new RegExp(destination, "i");
-  if (team) filter.team = new RegExp(team, "i");
+  if (origin) filter.origin = buildLooseRegex(origin);
+  if (destination) filter.destination = buildLooseRegex(destination);
+  if (team) filter.team = buildLooseRegex(team, { stripTeamWords: true });
+
+  if (mine) {
+    const session = await getSession();
+    if (!session) {
+      return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+    }
+    filter.creatorId = session.userId;
+  }
 
   if (dateStr) {
     const start = new Date(dateStr);
@@ -30,7 +40,7 @@ export async function GET(req: Request) {
   }
 
   const trips = await Trip.find(filter)
-    .sort({ date: 1 })
+    .sort({ date: 1, time: 1 })
     .limit(100)
     .populate("creatorId", "username avatar")
     .lean();
@@ -41,14 +51,12 @@ export async function GET(req: Request) {
     destination: t.destination,
     date: t.date,
     time: t.time || "",
-    time: t.time || "",
     match: t.match,
     team: t.team,
     seatsAvailable: t.seatsAvailable,
     seatsTotal: t.seatsTotal,
     priceCents: t.priceCents,
     contactPreference: t.contactPreference,
-    meetingPoint,
     meetingPoint: t.meetingPoint || "",
     creator: {
       username: t.creatorId?.username || "Usuario",

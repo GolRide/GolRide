@@ -8,8 +8,6 @@ const TripSchema = new Schema(
     destination: { type: String, required: true },
 
     date: { type: Date, required: true, index: true },
-    time: { type: String, default: "" },
-
     // ✅ NUEVO: hora (obligatoria)
     time: { type: String, required: true }, // "HH:mm"
 
