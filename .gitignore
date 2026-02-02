@@ -14,3 +14,6 @@ cookies*.txt
 # next
 .next/
 node_modules/
+
+# more backups
+*.bak.*
