@@ -1,0 +1,48 @@
+import Link from "next/link"
+
+export function Navbar({ isAuthed }: { isAuthed: boolean }) {
+  return (
+    <header className="border-b bg-white">
+      <div className="mx-auto max-w-6xl px-4 h-14 flex items-center justify-between">
+        <Link href="/" className="font-semibold tracking-tight">
+          GolRide
+        </Link>
+
+        <nav className="flex items-center gap-2 text-sm">
+          {!isAuthed ? (
+            <>
+              <Link
+                className="rounded-xl px-3 py-2 no-underline hover:bg-zinc-100"
+                href="/login"
+              >
+                Login
+              </Link>
+              <Link
+                className="rounded-xl px-3 py-2 no-underline hover:bg-zinc-100"
+                href="/register"
+              >
+                Registro
+              </Link>
+            </>
+          ) : (
+            <>
+              <Link
+                className="rounded-xl px-3 py-2 no-underline hover:bg-zinc-100"
+                href="/dashboard"
+              >
+                Dashboard
+              </Link>
+              <Link
+                className="rounded-xl px-3 py-2 no-underline hover:bg-zinc-100"
+                href="/api/auth/logout"
+              >
+                Salir
+              </Link>
+            </>
+          )}
+        </nav>
+      </div>
+    </header>
+  )
+}
+
