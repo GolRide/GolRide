@@ -1,14 +1,8 @@
 import { dbConnect } from "@/lib/db";
 import { Trip } from "@/models/Trip";
 import User from "@/models/User";
-import { TripCard } from "@/components/TripCard";
-
-function fmtDate(d: Date) {
-  return new Intl.DateTimeFormat("es-ES", { dateStyle: "medium" }).format(d);
-}
-function fmtPrice(cents: number) {
-  return new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" }).format(cents / 100);
-}
+import { TripInfoCard } from "@/components/trips/TripInfoCard";
+import { buildLooseRegex } from "@/lib/search";
 
 export async function TripsGrid({ searchParams }: { searchParams: Record<string, any> }) {
   await dbConnect();
@@ -19,9 +13,9 @@ export async function TripsGrid({ searchParams }: { searchParams: Record<string,
   const team = typeof searchParams.team === "string" ? searchParams.team.trim() : "";
 
   const q: any = { active: true };
-  if (origin) q.origin = new RegExp(origin, "i");
-  if (destination) q.destination = new RegExp(destination, "i");
-  if (team) q.team = new RegExp(team, "i");
+  if (origin) q.origin = buildLooseRegex(origin);
+  if (destination) q.destination = buildLooseRegex(destination);
+  if (team) q.team = buildLooseRegex(team, { stripTeamWords: true });
   if (date) {
     const start = new Date(date);
     const end = new Date(date);
@@ -29,27 +23,36 @@ export async function TripsGrid({ searchParams }: { searchParams: Record<string,
     q.date = { $gte: start, $lt: end };
   }
 
-  const trips = await Trip.find(q).sort({ date: 1 }).limit(12).lean();
+  const trips = await Trip.find(q).sort({ date: 1, time: 1 }).limit(12).lean();
 
   if (!trips.length) {
     return <p className="text-sm text-zinc-600">No hay viajes aún con esos filtros. Prueba a cambiar la búsqueda.</p>;
   }
 
   const creatorIds = trips.map((t: any) => t.creatorId);
-  const creators = await User.find({ _id: { $in: creatorIds } }, { avatarUrl: 1 }).lean();
-  const avatarById = new Map(creators.map((c: any) => [String(c._id), c.avatarUrl || ""]));
+  const creators = await User.find({ _id: { $in: creatorIds } }, { username: 1 }).lean();
+  const nameById = new Map(creators.map((c: any) => [String(c._id), c.username || "Usuario"]));
 
   return (
     <div className="grid gap-3">
       {trips.map((t: any) => (
-        <TripCard
+        <TripInfoCard
           key={String(t._id)}
-          id={String(t._id)}
-          destination={t.destination}
-          team={t.team}
-          dateLabel={fmtDate(new Date(t.date))}
-          priceLabel={fmtPrice(t.priceCents)}
-          avatarUrl={avatarById.get(String(t.creatorId)) || undefined}
+          href={`/trips/${t._id}`}
+          trip={{
+            id: String(t._id),
+            origin: t.origin,
+            destination: t.destination,
+            meetingPoint: t.meetingPoint || "",
+            date: t.date,
+            time: t.time,
+            match: t.match,
+            team: t.team,
+            seatsAvailable: t.seatsAvailable,
+            seatsTotal: t.seatsTotal,
+            priceCents: t.priceCents,
+            creatorName: nameById.get(String(t.creatorId)) || "Usuario",
+          }}
         />
       ))}
     </div>
