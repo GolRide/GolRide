@@ -19,3 +19,12 @@ node_modules/
 node_modules
 .next
 *.log
+
+# backups accidentales
+*.bak
+*.bak.*
+*.bak_*
+*.BAK
+*.BAK*
+*.orig
+*~
