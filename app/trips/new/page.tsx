@@ -5,7 +5,7 @@
 import { Page } from "@/components/ui/Page";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 const styles: Record<string, React.CSSProperties> = {
   page: { padding: 24, fontFamily: "system-ui" },
@@ -56,8 +56,12 @@ const BASE_CATEGORIES = [
 export default function NewTripPage() {
   const router = useRouter();
   const [isBase, setIsBase] = useState(false);
+  const [matchHome, setMatchHome] = useState("");
+  const [matchAway, setMatchAway] = useState("");
   const [errorMsg, setErrorMsg] = useState<string>("");
 
+  const submitIdRef = useRef<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const todayStr = new Date().toISOString().split("T")[0];
 
   const [form, setForm] = useState({
@@ -79,7 +83,16 @@ export default function NewTripPage() {
     setErrorMsg("");
     e.preventDefault();
 
+
+    // idempotencia: si se dispara el submit 2 veces, usamos el mismo id
+    if (!submitIdRef.current) {
+      submitIdRef.current = (globalThis.crypto && typeof crypto.randomUUID === "function")
+        ? crypto.randomUUID()
+        : String(Date.now()) + "-" + Math.random();
+    }
+    const clientRequestId = submitIdRef.current;
     const payload = {
+      clientRequestId,
       ...form,
       isBase,
       baseCategory: isBase ? form.baseCategory : null,
@@ -107,7 +120,8 @@ export default function NewTripPage() {
       return;
     }
 
-    router.push(`/trips/${data.id}`);
+    submitIdRef.current = null;
+      router.push(`/trips/published/${data.id}`);
   }
 
   return (
@@ -178,55 +192,73 @@ export default function NewTripPage() {
                 <label style={styles.label}>Equipo</label>
                 <input
                   style={styles.input}
-                  placeholder="Ej: Xerez CD"
+                  placeholder="Ej: Valencia CF"
                   value={form.team}
                   onChange={(e)=>setForm({...form, team:e.target.value})}
                 />
               </div>
 
               <div style={styles.full}>
-                <label style={styles.label}>Partido</label>
-                <input
-                  style={styles.input}
-                  placeholder="Ej: UD Almería vs Málaga CF"
-                  value={form.match}
-                  onChange={(e)=>setForm({...form, match:e.target.value})}
-                />
+  <label style={styles.label}>Partido</label>
+  <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+    <input
+      style={styles.input}
+      placeholder="Ej: Málaga CF"
+      value={matchHome}
+      onChange={(e)=>{
+        const v = e.target.value;
+        setMatchHome(v);
+        setForm({...form, match: v + " vs " + matchAway});
+      }}
+    />
+    <span style={{ fontWeight: 800, opacity: 0.7, padding: "0 2px" }}>vs</span>
+    <input
+      style={styles.input}
+      placeholder="Ej: UD Almeria"
+      value={matchAway}
+      onChange={(e)=>{
+        const v = e.target.value;
+        setMatchAway(v);
+        setForm({...form, match: matchHome + " vs " + v});
+      }}
+    />
+  </div>
 
-                
-                  <label style={styles.label}>Punto de encuentro (opcional)</label>
-                  <input
-                    style={styles.input}
-                    placeholder="Ej: Parking del estadio, Puerta 3"
-                    value={form.meetingPoint}
-                    onChange={(e)=>setForm({...form, meetingPoint:e.target.value})}
-                  />
-                  <div style={{ marginTop: 6, fontSize: 12, opacity: 0.75 }}>
-                    Si aún no lo tienes claro, podéis acordarlo por el método de contacto elegido.
-                  </div>
+  <div style={{ ...styles.row, marginTop: 10 }}>
+    <input
+      type="checkbox"
+      style={styles.checkbox}
+      checked={isBase}
+      onChange={(e)=>setIsBase(e.target.checked)}
+    />
+    <span>¿Tu partido es fútbol base?</span>
+  </div>
 
-<div style={styles.row}>
-                  <input
-                    type="checkbox"
-                    style={styles.checkbox}
-                    checked={isBase}
-                    onChange={(e)=>setIsBase(e.target.checked)}
-                  />
-                  <span>¿Tu partido es fútbol base?</span>
-                </div>
+  {isBase && (
+    <select
+      style={{...styles.input, marginTop:8}}
+      value={form.baseCategory}
+      onChange={(e)=>setForm({...form, baseCategory:e.target.value})}
+    >
+      {BASE_CATEGORIES.map(c => (
+        <option key={c} value={c}>{c}</option>
+      ))}
+    </select>
+  )}
+</div>
 
-                {isBase && (
-                  <select
-                    style={{...styles.input, marginTop:8}}
-                    value={form.baseCategory}
-                    onChange={(e)=>setForm({...form, baseCategory:e.target.value})}
-                  >
-                    {BASE_CATEGORIES.map(c => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
-                )}
-              </div>
+<div style={styles.full}>
+  <label style={styles.label}>Punto de encuentro (opcional)</label>
+  <input
+    style={styles.input}
+    placeholder="Ej: Parking del estadio, Puerta 3"
+    value={form.meetingPoint}
+    onChange={(e)=>setForm({...form, meetingPoint:e.target.value})}
+  />
+  <div style={{ marginTop: 6, fontSize: 12, opacity: 0.75 }}>
+    Si aún no lo tienes claro, podéis acordarlo por el método de contacto elegido.
+  </div>
+</div>
 
               <div>
                 <label style={styles.label}>Precio €/plaza</label>
@@ -252,7 +284,7 @@ export default function NewTripPage() {
               </div>
             </div>
 
-            <button type="submit" style={styles.button}>Publicar viaje</button>
+            <button type="submit" style={styles.button} disabled={isSubmitting}>Publicar viaje</button>
           {errorMsg && <div style={{ marginTop: 12, color: "#b91c1c", fontWeight: 700 }}>{errorMsg}</div>}
           </form>
         </section>

@@ -1,0 +1,38 @@
+import { Resend } from "resend";
+
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+function pickRecipient(requestedTo: string) {
+  const allowed = (process.env.RESEND_ALLOWED_TO || "").trim().toLowerCase();
+  const to = requestedTo.trim().toLowerCase();
+
+  // En producción, envía al destinatario real
+  if (process.env.NODE_ENV === "production") return to;
+
+  // En desarrollo, Resend solo permite enviar a tu propio email si no hay dominio verificado
+  return allowed || to;
+}
+
+export async function sendVerificationCodeEmail(to: string, code: string) {
+  if (!process.env.RESEND_API_KEY) throw new Error("RESEND_API_KEY missing");
+
+  const from = process.env.EMAIL_FROM || "GolRide <onboarding@resend.dev>";
+  const finalTo = pickRecipient(to);
+
+  const { error } = await resend.emails.send({
+    from,
+    to: finalTo,
+    subject: "Tu código de verificación - GolRide",
+    html: `
+      <div style="font-family:Arial,sans-serif;line-height:1.4">
+        <h2>Verifica tu correo</h2>
+        <p>Cuenta registrada con: <b>${to}</b></p>
+        <p>Tu código es:</p>
+        <div style="font-size:28px;font-weight:700;letter-spacing:6px;margin:16px 0">${code}</div>
+        <p>Caduca en <b>15 minutos</b>.</p>
+      </div>
+    `,
+  });
+
+  if (error) throw new Error(error.message);
+}

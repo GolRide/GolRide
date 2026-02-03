@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 
 export default function Home() {
   const styles: any = {
@@ -63,6 +64,8 @@ export default function Home() {
       marginTop: 0,
     },
     stadiumCard: {
+      position: "relative",
+      overflow: "hidden",
       height: 120,
       borderRadius: 16,
       background: "linear-gradient(180deg,#eef6ff 0%, #e6edf8 100%)",
@@ -160,9 +163,19 @@ export default function Home() {
 
         <section style={styles.stadiums}>
           <div style={styles.stadiumGrid}>
-            {Array.from({ length: 8 }).map((_, i) => (
-              <div key={i} style={styles.stadiumCard} />
-            ))}
+            {[1,2,3,4,5,6,7,8].map((n) => (
+  <div key={n} style={styles.stadiumCard}>
+    <Image
+      src={"/stadiums/" + n + ".jpg"}
+      alt={"Estadio " + n}
+      fill
+      unoptimized
+      sizes="(max-width: 900px) 50vw, 25vw"
+      style={{ objectFit: "cover" }}
+    />
+    <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.15)" }} />
+  </div>
+))}
           </div>
         </section>
       </div>

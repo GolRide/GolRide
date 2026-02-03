@@ -1,0 +1,63 @@
+"use client";
+
+import { Card } from "@/components/ui/Card";
+import { Input } from "@/components/ui/Input";
+import { Button } from "@/components/ui/Button";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useState } from "react";
+
+export default function LoginPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+const next = searchParams.get("next") || "/dashboard";
+
+  const [error, setError] = useState("");
+
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+
+    const formData = new FormData(e.currentTarget);
+
+    const res = await fetch("/api/auth/login", {
+      method: "POST",
+      body: formData,
+    });
+
+    if (res.ok) {
+      window.location.href = (next as any);
+    } else {
+      setError("Credenciales incorrectas");
+    }
+  }
+
+  return (
+    <div className="mx-auto max-w-6xl px-4 py-14">
+      <div className="mx-auto max-w-lg">
+        <Card title="Iniciar sesión" desc="Accede a tu perfil, publica viajes y gestiona reservas.">
+          <form onSubmit={handleSubmit} className="grid gap-3">
+            <div>
+              <label className="text-sm font-medium">Email</label>
+              <Input name="email" type="email" required placeholder="tu@email.com" />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Contraseña</label>
+              <Input name="password" type="password" required placeholder="********" />
+            </div>
+            <Button type="submit">Entrar</Button>
+
+            {error && <p className="text-sm text-red-600">{error}</p>}
+          </form>
+
+          <p className="mt-5 text-sm text-zinc-700">
+            ¿Aún no estás registrado?{" "}
+            <Link href="/register" className="font-medium">
+              Pincha aquí
+            </Link>
+          </p>
+        </Card>
+      </div>
+    </div>
+  );
+}
+

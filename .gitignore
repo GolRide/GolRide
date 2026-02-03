@@ -14,3 +14,8 @@ cookies*.txt
 # next
 .next/
 node_modules/
+.env
+.env.*
+node_modules
+.next
+*.log

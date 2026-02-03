@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import jwt from "jsonwebtoken";
 import connectDB from "@/lib/mongodb";
 import User from "@/models/User";
+import { verifyPassword } from "@/lib/auth";
 
 export async function POST(req: Request) {
   await connectDB();
@@ -13,18 +14,30 @@ export async function POST(req: Request) {
 
   if (contentType?.includes("application/json")) {
     const body = await req.json();
-    email = body.email;
-    password = body.password;
+    email = String(body.email || "");
+    password = String(body.password || "");
   } else {
     const formData = await req.formData();
-    email = formData.get("email") as string;
-    password = formData.get("password") as string;
+    email = String(formData.get("email") || "");
+    password = String(formData.get("password") || "");
+  }
+
+  email = email.trim().toLowerCase();
+  password = password || "";
+
+  if (!email || !password) {
+    return NextResponse.json({ error: "Missing credentials" }, { status: 400 });
   }
 
   const user = await User.findOne({ email });
 
   if (!user) {
-    return NextResponse.json({ error: "User not found" }, { status: 404 });
+    return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
+  }
+
+  const ok = await verifyPassword(password, user.passwordHash);
+  if (!ok) {
+    return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
   }
 
   const token = jwt.sign(
@@ -35,7 +48,7 @@ export async function POST(req: Request) {
 
   const res = NextResponse.json({ ok: true });
 
-res.cookies.set("token", token, {
+  res.cookies.set("token", token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
@@ -45,4 +58,3 @@ res.cookies.set("token", token, {
 
   return res;
 }
-

@@ -25,7 +25,8 @@ const next = searchParams.get("next") || "/dashboard";
     });
 
     if (res.ok) {
-      window.location.href = (next as any);
+      router.replace(next as any);
+      router.refresh();
     } else {
       setError("Credenciales incorrectas");
     }
@@ -47,11 +48,15 @@ const next = searchParams.get("next") || "/dashboard";
             <Button type="submit">Entrar</Button>
 
             {error && <p className="text-sm text-red-600">{error}</p>}
-          </form>
+          
+      <a href="/forgot-password" className="mt-2 block text-sm text-zinc-600 underline">
+        ¿Has olvidado tu contraseña? Pulsa aquí
+      </a>
+</form>
 
           <p className="mt-5 text-sm text-zinc-700">
             ¿Aún no estás registrado?{" "}
-            <Link href="/register" className="font-medium">
+            <Link href={`/register?next=${encodeURIComponent(next)}`} className="font-medium">
               Pincha aquí
             </Link>
           </p>

@@ -1,11 +1,25 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 
 export default function RegisterPage() {
-  const [accountType, setAccountType] = useState<"particular" | "club" | "pena">("particular");
+      const router = useRouter();
+  const sp = useSearchParams();
 
-  const labels = useMemo(() => {
+  const nextUrl = sp.get("next") || "/dashboard";
+
+  const accountType = (sp.get("accountType") || "particular");
+  const uTaken = sp.get("u") === "1";
+  const eTaken = sp.get("e") === "1";
+  const pTaken = sp.get("p") === "1";
+
+  const goType = (t: string) => {
+    router.replace("/register?accountType=" + encodeURIComponent(t));
+    router.refresh();
+  };
+
+const labels = useMemo(() => {
     if (accountType === "club") {
       return {
         username: "Nombre del club",
@@ -79,13 +93,13 @@ export default function RegisterPage() {
           <div style={{ marginTop: 6 }}>
             <div style={styles.segTitle}>TIPO DE CUENTA</div>
             <div style={styles.segRow}>
-              <button type="button" style={styles.segBtn(accountType === "particular")} onClick={() => setAccountType("particular")}>
+              <button type="button" style={styles.segBtn(accountType === "particular")} onClick={() => { window.location.href = "/register?accountType=particular&next=" + encodeURIComponent(nextUrl); }}>
                 Particular
               </button>
-              <button type="button" style={styles.segBtn(accountType === "club")} onClick={() => setAccountType("club")}>
+              <button type="button" style={styles.segBtn(accountType === "club")} onClick={() => { window.location.href = "/register?accountType=club&next=" + encodeURIComponent(nextUrl); }}>
                 Club
               </button>
-              <button type="button" style={styles.segBtn(accountType === "pena")} onClick={() => setAccountType("pena")}>
+              <button type="button" style={styles.segBtn(accountType === "pena")} onClick={() => { window.location.href = "/register?accountType=pena&next=" + encodeURIComponent(nextUrl); }}>
                 Peña
               </button>
             </div>
@@ -96,12 +110,15 @@ export default function RegisterPage() {
           </div>
 
           {/* Form */}
-          <form action="/api/auth/register" method="post" style={{ marginTop: 14 }}>
+          <form action="/api/auth/register" method="post" style={{ marginTop: 14 }} key={accountType}>
             <input type="hidden" name="accountType" value={accountType} />
+            <input type="hidden" name="next" value={nextUrl} />
 
             <div style={styles.field}>
               <label style={styles.label}>{labels.username}</label>
               <input name="username" required style={styles.input} />
+        {/* __MSG_USERNAME__ */}
+        {uTaken && <p className="mt-1 text-sm text-red-600">Este nombre de usuario está en uso</p>}
             </div>
 
             <div style={styles.row2}>
@@ -118,17 +135,21 @@ export default function RegisterPage() {
 
             <div style={styles.field}>
               <label style={styles.label}>Equipo</label>
-              <input name="team" required style={styles.input} placeholder='Ej: Xerez CD' />
+              <input name="team" style={styles.input} placeholder='Ej: Xerez CD' />
             </div>
 
             <div style={styles.field}>
               <label style={styles.label}>Teléfono</label>
               <input name="phone" required style={styles.input} />
+        {/* __MSG_PHONE__ */}
+        {pTaken && <p className="mt-1 text-sm text-red-600">Este número de teléfono ya ha sido registrado</p>}
             </div>
 
             <div style={styles.field}>
               <label style={styles.label}>Email</label>
               <input name="email" type="email" required style={styles.input} />
+        {/* __MSG_EMAIL__ */}
+        {eTaken && <p className="mt-1 text-sm text-red-600">Este email ya ha sido registrado</p>}
             </div>
 
             <div style={styles.field}>
@@ -147,7 +168,7 @@ export default function RegisterPage() {
             <button type="submit" style={styles.btn}>Crear cuenta</button>
 
             <div style={styles.link}>
-              ¿Ya tienes cuenta? <a href="/login" style={{ color: "#0f172a", fontWeight: 900 }}>Inicia sesión</a>
+              ¿Ya tienes cuenta? <a href={`/login?next=${encodeURIComponent(nextUrl)}`} style={{ color: "#0f172a", fontWeight: 900 }}>Inicia sesión</a>
             </div>
           </form>
         </div>

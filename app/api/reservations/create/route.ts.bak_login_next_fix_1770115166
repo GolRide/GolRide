@@ -1,0 +1,51 @@
+import { NextResponse } from "next/server";
+import { requireSession } from "@/lib/auth";
+import { dbConnect } from "@/lib/db";
+import { Reservation } from "@/models/Reservation";
+import { Trip } from "@/models/Trip";
+
+export async function POST(req: Request) {
+  const session = await requireSession();
+  const form = await req.formData();
+  const tripId = String(form.get("tripId") || "");
+
+  await dbConnect();
+  const trip: any = await Trip.findById(tripId);
+  if (!trip || !trip.active) return NextResponse.redirect(new URL("/", req.url));
+  if (String(trip.creatorId) === session.userId) return NextResponse.redirect(new URL(`/trips/${tripId}`, req.url));
+  if (trip.seatsAvailable < 1) return NextResponse.redirect(new URL(`/trips/${tripId}?error=full`, req.url));
+
+  // If a reservation exists, reuse it
+  let reservation: any = await Reservation.findOne({ tripId, userId: session.userId });
+  if (!reservation) {
+    reservation = await Reservation.create({ tripId, userId: session.userId, status: "pending" });
+  } else if (reservation.status === "paid") {
+    return NextResponse.redirect(new URL(`/trips/${tripId}`, req.url));
+  }
+
+  // ✅ MODO PASARELA SIMULADA (sin Stripe por ahora)
+  // Marcamos como pagado, descontamos 1 plaza y redirigimos al perfil con un flag para mostrar el modal
+
+  // Evitar doble cobro / doble descuento
+  if (reservation.status === "paid") {
+    return NextResponse.redirect(new URL(`/dashboard/profile`, req.url));
+  }
+
+  // Descontar plaza de forma atómica (evita overbooking)
+  const upd = await Trip.updateOne(
+    { _id: tripId, seatsAvailable: { $gt: 0 } },
+    { $inc: { seatsAvailable: -1 } }
+  );
+
+  if ((upd as any).modifiedCount === 0 && (upd as any).nModified === 0) {
+    // Por si alguien reservó justo antes
+    return NextResponse.redirect(new URL(`/trips/${tripId}?error=full`, req.url));
+  }
+
+  reservation.status = "paid";
+  (reservation as any).paidAt = new Date();
+  await reservation.save();
+
+  return NextResponse.redirect(new URL(`/dashboard/profile?reserved=1`, req.url));
+
+}

@@ -3,60 +3,71 @@ import { requireSession } from "@/lib/auth";
 import { dbConnect } from "@/lib/db";
 import { Reservation } from "@/models/Reservation";
 import { Trip } from "@/models/Trip";
-import { getStripe } from "@/lib/stripe";
-import { absoluteUrl } from "@/lib/url";
 
 export async function POST(req: Request) {
-  const session = requireSession();
   const form = await req.formData();
   const tripId = String(form.get("tripId") || "");
+
+  // ✅ Si NO hay sesión, mandamos a login preservando el flujo de reserva
+  let session: any = null;
+  try {
+    session = await requireSession();
+  } catch {
+    const nextUrl = `/reserve/${tripId}`;
+    const loginUrl = new URL(`/login?next=${encodeURIComponent(nextUrl)}`, req.url);
+    return NextResponse.redirect(loginUrl);
+  }
+
+  const userId =
+    session?.userId ||
+    session?.user?.id ||
+    session?.user?._id ||
+    session?.user?.userId ||
+    null;
+
+  if (!userId) {
+    const nextUrl = `/reserve/${tripId}`;
+    const loginUrl = new URL(`/login?next=${encodeURIComponent(nextUrl)}`, req.url);
+    return NextResponse.redirect(loginUrl);
+  }
 
   await dbConnect();
   const trip: any = await Trip.findById(tripId);
   if (!trip || !trip.active) return NextResponse.redirect(new URL("/", req.url));
-  if (String(trip.creatorId) === session.userId) return NextResponse.redirect(new URL(`/trips/${tripId}`, req.url));
+  if (String(trip.creatorId) === userId) return NextResponse.redirect(new URL(`/trips/${tripId}`, req.url));
   if (trip.seatsAvailable < 1) return NextResponse.redirect(new URL(`/trips/${tripId}?error=full`, req.url));
 
   // If a reservation exists, reuse it
-  let reservation: any = await Reservation.findOne({ tripId, userId: session.userId });
+  let reservation: any = await Reservation.findOne({ tripId, userId: userId });
   if (!reservation) {
-    reservation = await Reservation.create({ tripId, userId: session.userId, status: "pending" });
+    reservation = await Reservation.create({ tripId, userId: userId, status: "pending" });
   } else if (reservation.status === "paid") {
-    return NextResponse.redirect(new URL(`/trips/${tripId}`, req.url));
+    return NextResponse.redirect(new URL(`/dashboard/active-trips`, req.url));
   }
 
-  const stripe = getStripe();
+  // ✅ MODO PASARELA SIMULADA (sin Stripe por ahora)
+  // Marcamos como pagado, descontamos 1 plaza y redirigimos al perfil con un flag para mostrar el modal
 
-  const successUrl = absoluteUrl(`/checkout/success?tripId=${tripId}`);
-  const cancelUrl = absoluteUrl(`/checkout/cancel?tripId=${tripId}`);
+  // Evitar doble cobro / doble descuento
+  if (reservation.status === "paid") {
+    return NextResponse.redirect(new URL(`/dashboard/profile`, req.url));
+  }
 
-  const sess = await stripe.checkout.sessions.create({
-    mode: "payment",
-    payment_method_types: ["card"],
-    line_items: [
-      {
-        quantity: 1,
-        price_data: {
-          currency: "eur",
-          unit_amount: trip.priceCents,
-          product_data: {
-            name: `GolRide · ${trip.origin} → ${trip.destination}`,
-            description: `Equipo: ${trip.team} · Partido: ${trip.match}`,
-          },
-        },
-      },
-    ],
-    metadata: {
-      reservationId: String(reservation._id),
-      tripId: String(trip._id),
-      buyerUserId: session.userId,
-    },
-    success_url: successUrl,
-    cancel_url: cancelUrl,
-  });
+  // Descontar plaza de forma atómica (evita overbooking)
+  const upd = await Trip.updateOne(
+    { _id: tripId, seatsAvailable: { $gt: 0 } },
+    { $inc: { seatsAvailable: -1 } }
+  );
 
-  reservation.stripeSessionId = sess.id;
+  if ((upd as any).modifiedCount === 0 && (upd as any).nModified === 0) {
+    // Por si alguien reservó justo antes
+    return NextResponse.redirect(new URL(`/trips/${tripId}?error=full`, req.url));
+  }
+
+  reservation.status = "paid";
+  (reservation as any).paidAt = new Date();
   await reservation.save();
 
-  return NextResponse.redirect(sess.url!);
+  return NextResponse.redirect(new URL(`/dashboard/profile?reserved=1`, req.url));
+
 }

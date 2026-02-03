@@ -1,95 +1,256 @@
 import Link from "next/link";
-import { headers } from "next/headers";
+import { requireSession } from "@/lib/auth";
+import { dbConnect } from "@/lib/db";
+import { Trip } from "@/models/Trip";
+import { Reservation } from "@/models/Reservation";
+import RefreshButton from "./RefreshButton";
+import UpdateSuccessModal from "./UpdateSuccessModal";
 
-type Trip = {
-  _id: string;
-  origin: string;
-  destination: string;
-  date: string;
-  time?: string;
-  match: string;
-  team: string;
-  seatsAvailable: number;
-  seatsTotal: number;
-  priceCents: number;
-  creator: { username?: string; avatar?: string };
-};
-
-function formatDateES(iso: string) {
-  try {
-    return new Date(iso).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" });
-  } catch {
-    return iso;
-  }
+function initials(name?: string) {
+  const s = (name || "U").trim();
+  const parts = s.split(/\s+/).filter(Boolean);
+  const a = parts[0]?.[0] || "U";
+  const b = parts[1]?.[0] || "";
+  return (a + b).toUpperCase();
 }
 
-async function getMyTrips(): Promise<Trip[]> {
-  const h = headers();
-  const host = h.get("host");
-  const proto = process.env.NODE_ENV === "development" ? "http" : "https";
+function organizerLabel(t: any) {
+  const c: any = (t as any)?.creator || (t as any)?.creatorId;
+  const username = (c?.username || "").trim();
+  const accountType = (c?.accountType || "particular").trim();
+  const name = (c?.name || "").trim();
 
-  const res = await fetch(`${proto}://${host}/api/trips?mine=1`, { cache: "no-store" });
-  if (!res.ok) return [];
-  const data = await res.json().catch(() => ({}));
-  return data.trips || [];
+  // Particular -> nombre real (si existe), si no username
+  if (accountType === "particular") return name || username || "Organizador";
+
+  // Club/peña -> nombre de entidad (si existe), si no username
+  if (accountType === "club" || accountType === "pena") return name || username || "Organizador";
+
+  return name || username || "Organizador";
 }
 
-export default async function ActiveTripsPage() {
-  const trips = await getMyTrips();
+function TripCardRow({ t, badge, href }: { t: any; badge?: string; href?: string }) {
+  const price = ((t?.priceCents || 0) / 100).toFixed(2);
+
+  const avatar = (t as any)?.creator?.avatar || (t as any)?.creatorId?.avatar || "";
+  const username = (t as any)?.creator?.username || (t as any)?.creatorId?.username || "";
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-black tracking-tight text-slate-900">Viajes activos</h1>
+    <Link
+      href={href || `/trips/${String(t._id)}`}
+      className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm hover:bg-slate-50"
+    >
+      <div className="flex items-start gap-4">
+        <div className="h-12 w-12 shrink-0 overflow-hidden rounded-full border border-slate-200 bg-slate-100 flex items-center justify-center font-extrabold text-slate-700">
+          {avatar ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={avatar} alt="avatar" className="h-full w-full object-cover" />
+          ) : (
+            initials(username)
+          )}
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-slate-800">
+                <span className="text-slate-500 font-bold">Organizador: </span>
+                <span className="font-extrabold text-slate-900">{organizerLabel(t)}</span>
+              </div>
+
+              <div className="truncate text-base font-extrabold text-slate-900">
+                {t.origin} → {t.destination}
+              </div>
+
+              <div className="mt-1 text-sm font-bold text-sky-700">
+                {new Date(t.date).toLocaleDateString("es-ES")}
+                {t.time ? ` · ${t.time}` : ""}
+              </div>
+
+              <div className="mt-1 text-sm font-semibold text-slate-800">
+                <span className="text-slate-500 font-bold">Equipo: </span>
+                {t.team}
+              </div>
+
+              <div className="mt-1 text-sm font-semibold text-slate-700">
+                <span className="text-slate-500 font-bold">Partido: </span>
+                {t.match}
+              </div>
+
+              {t.isBase ? (
+                <div className="mt-1 text-sm font-semibold text-slate-700">
+                  <span className="text-slate-500 font-bold">Fútbol base: </span>
+                  {t.baseCategory || "Sí"}
+                </div>
+              ) : null}
+
+              {t.meetingPoint ? (
+                <div className="mt-1 text-xs font-bold text-slate-500 truncate">
+                  Punto de encuentro: {t.meetingPoint}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="text-right shrink-0">
+              {badge ? (
+                <div className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">
+                  {badge}
+                </div>
+              ) : null}
+
+              <div className="mt-2 text-base font-extrabold text-teal-700">
+                {price} €
+              </div>
+              <div className="mt-1 text-sm font-bold text-teal-700">
+                {t.seatsAvailable}/{t.seatsTotal} plazas
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Link>
+  );
+}
+
+export default async function ActiveTripsPage({ searchParams }: { searchParams?: { tab?: string } }) {
+  const tab = searchParams?.tab === "publicados" ? "publicados" : "reservados";
+
+  // Si no hay sesión -> login
+  let session: any = null;
+  try {
+    session = await requireSession();
+  } catch {
+    return (
+      <main className="mx-auto max-w-6xl px-4 py-8">
+        <div className="rounded-2xl border border-slate-200 bg-white p-6">
+          <div className="text-lg font-extrabold text-slate-900">Inicia sesión</div>
+          <div className="mt-1 text-sm text-slate-600">
+            Para ver tus viajes activos y reservas necesitas entrar.
+          </div>
+          <Link
+            href="/login?next=/dashboard/active-trips"
+            className="mt-4 inline-flex rounded-xl bg-black text-white px-4 py-2 font-extrabold hover:opacity-90"
+          >
+            Ir a login
+          </Link>
+        </div>
+      </main>
+    );
+  }
+
+  const userId =
+    session?.userId ||
+    session?.user?.id ||
+    session?.user?._id ||
+    session?.user?.userId ||
+    null;
+
+  if (!userId) {
+    return (
+      <main className="mx-auto max-w-6xl px-4 py-8">
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 text-slate-700">
+          No se pudo obtener tu sesión. Vuelve a iniciar sesión.
+        </div>
+      </main>
+    );
+  }
+
+  await dbConnect();
+
+  // 1) Publicados por ti
+  const myTrips: any[] = await Trip.find({ creatorId: userId, active: true })
+    .sort({ date: 1 })
+    .populate("creatorId")
+    .lean();
+
+  // 2) Reservados por ti (status paid)
+  const reservedTripIds: any[] = await Reservation.find({ userId, status: "paid" }).distinct("tripId");
+  const reservedTrips: any[] = reservedTripIds?.length
+    ? await Trip.find({ _id: { $in: reservedTripIds }, active: true }).sort({ date: 1 }).populate("creatorId").lean()
+    : [];
+
+  // Evitar duplicados
+  const myTripIds = new Set((myTrips || []).map((t: any) => String(t._id)));
+  const reservedFiltered = (reservedTrips || []).filter((t: any) => !myTripIds.has(String(t._id)));
+
+  return (
+    <main className="mx-auto max-w-6xl px-4 py-8">
+      <div className="mb-4 flex items-end justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-black tracking-tight text-slate-900">Viajes activos</h1>
+          <div className="mt-1 text-sm font-bold text-slate-600">Tus viajes publicados y tus reservas</div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <RefreshButton />
+          <Link
+            href="/publish"
+            className="rounded-xl bg-black text-white px-4 py-2 font-extrabold hover:opacity-90"
+          >
+            Publicar viaje
+          </Link>
+        </div>
+      </div>
+
+      <div className="mb-6 flex items-center gap-2">
         <Link
-          href="/trips/new"
-          className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 font-extrabold text-slate-900 hover:bg-slate-50"
+          href="/dashboard/active-trips?tab=reservados"
+          className={
+            tab === "reservados"
+              ? "inline-flex rounded-xl bg-black text-white px-4 py-2 font-extrabold hover:opacity-90"
+              : "inline-flex rounded-xl border border-slate-300 bg-white px-4 py-2 font-extrabold text-slate-700 hover:bg-slate-50"
+          }
         >
-          + Publicar viaje
+          Reservados
+        </Link>
+
+        <Link
+          href="/dashboard/active-trips?tab=publicados"
+          className={
+            tab === "publicados"
+              ? "inline-flex rounded-xl bg-black text-white px-4 py-2 font-extrabold hover:opacity-90"
+              : "inline-flex rounded-xl border border-slate-300 bg-white px-4 py-2 font-extrabold text-slate-700 hover:bg-slate-50"
+          }
+        >
+          Publicados por ti
         </Link>
       </div>
 
-      {trips.length === 0 ? (
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 text-slate-700 shadow-sm">
-          Aún no has publicado viajes. Cuando publiques uno, aparecerá aquí.
-        </div>
-      ) : (
-        <div className="grid gap-3">
-          {trips.map((t) => (
-            <Link
-              key={t._id}
-              href={`/trips/${t._id}`}
-              className="block rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300"
-            >
-              <div className="flex items-center justify-between gap-4">
-                <div className="min-w-0">
-                  <div className="text-sm font-extrabold text-slate-900">
-                    {t.origin} → {t.destination}
-                  </div>
+      <UpdateSuccessModal />
 
-                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs">
-                    <span className="font-bold text-sky-700">
-                      {formatDateES(t.date)}{t.time ? ` · ${t.time}` : ""}
-                    </span>
-                    <span className="font-bold text-indigo-700">{t.team}</span>
-                    <span className="font-bold text-slate-700">{t.match}</span>
-                  </div>
-
-                  <div className="mt-2 text-xs text-slate-600">
-                    Plazas: <span className="font-extrabold text-emerald-700">{t.seatsAvailable}</span> / {t.seatsTotal}
-                  </div>
-                </div>
-
-                <div className="shrink-0 text-right">
-                  <div className="inline-flex rounded-xl bg-slate-900 px-3 py-2 text-sm font-extrabold text-white">
-                    {(t.priceCents / 100).toFixed(2)} €
-                  </div>
-                </div>
+      {tab === "reservados" && (
+        <div className="mt-6">
+          <div className="text-sm font-black text-slate-900">Reservas</div>
+          <div className="mt-3 grid gap-3">
+            {reservedFiltered.length ? (
+              reservedFiltered.map((t: any) => (
+                <TripCardRow key={String(t._id)} t={t} badge="RESERVADO" href={`/dashboard/reservations/${String(t._id)}`} />
+              ))
+            ) : (
+              <div className="rounded-2xl border border-slate-200 bg-white p-6 text-slate-700">
+                Aún no tienes reservas.
               </div>
-            </Link>
-          ))}
+            )}
+          </div>
         </div>
       )}
-    </div>
+
+      {tab === "publicados" && (
+        <div className="mt-8">
+          <div className="text-sm font-black text-slate-900">Publicados por ti</div>
+          <div className="mt-3 grid gap-3">
+            {myTrips.length ? (
+              myTrips.map((t: any) => <TripCardRow key={String(t._id)} t={t} />)
+            ) : (
+              <div className="rounded-2xl border border-slate-200 bg-white p-6 text-slate-700">
+                Aún no has publicado viajes.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </main>
   );
+
 }
+

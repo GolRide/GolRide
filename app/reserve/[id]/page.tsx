@@ -1,0 +1,168 @@
+import Link from "next/link";
+import { headers } from "next/headers";
+import { requireSession } from "@/lib/auth";
+
+type PageProps = { params: { id: string } };
+
+async function getTrip(id: string) {
+  const h = headers();
+  const host = h.get("host");
+  const proto = process.env.NODE_ENV === "development" ? "http" : "https";
+  const res = await fetch(`${proto}://${host}/api/trips/${id}`, { cache: "no-store" });
+  const data = await res.json().catch(() => null);
+  return data?.trip ?? null;
+}
+
+export default async function ReservePage({ params }: PageProps) {
+  const trip = await getTrip(params.id);
+
+  if (!trip) {
+    return (
+      <main className="mx-auto max-w-3xl px-4 py-10">
+        <div className="rounded-2xl border bg-white p-6">
+          <h1 className="text-xl font-black text-slate-900">Viaje no encontrado</h1>
+          <p className="mt-2 text-slate-600">Puede que se haya eliminado o el enlace sea incorrecto.</p>
+          <div className="mt-6">
+            <Link
+              href="/trips"
+              className="inline-block rounded-xl bg-slate-900 px-4 py-2 text-[15px] font-black text-white hover:bg-slate-800"
+            >
+              Volver
+            </Link>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  let session: any = null;
+  try {
+    session = await requireSession();
+  } catch {
+    session = null;
+  }
+
+  const nextUrl = `/reserve/${params.id}`;
+  const loginHref = `/login?next=${encodeURIComponent(nextUrl)}`;
+  const registerHref = `/register?next=${encodeURIComponent(nextUrl)}`;
+
+  const price = ((trip.priceCents || 0) / 100).toFixed(2);
+
+  // NO logueado -> pantalla con 2 botones
+  if (!session) {
+    return (
+      <main className="mx-auto max-w-3xl px-4 py-10">
+        <div className="rounded-2xl border bg-white p-6 shadow-sm">
+          <h1 className="text-xl font-black text-slate-900">Reserva</h1>
+          <p className="mt-2 text-slate-600">
+            Para continuar con tu reserva, necesitas iniciar sesión o registrarte.
+          </p>
+
+          <div className="mt-6 grid gap-3">
+            <Link
+              href={loginHref}
+              className="w-full rounded-xl bg-black text-white px-4 py-3 font-bold hover:opacity-90 text-center"
+            >
+              Iniciar sesión
+            </Link>
+
+            <Link
+              href={registerHref}
+              className="w-full rounded-xl border px-4 py-3 font-bold hover:bg-zinc-50 text-center"
+            >
+              Regístrate
+            </Link>
+
+            <Link href={`/trips/${params.id}`} className="text-sm text-slate-700 hover:underline text-center">
+              Volver al viaje
+            </Link>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  // Logueado -> resumen + pagar (compacto)
+  const c: any = (trip as any)?.creator || (trip as any)?.creatorId;
+  const organizerName = (() => {
+    const username = (c?.username || "").trim() || "Usuario";
+    const accountType = (c?.accountType || "particular").trim();
+    const nameOnly = (c?.name || "").trim();
+    const isOrgEntity = accountType === "club" || accountType === "pena";
+    if (isOrgEntity) return username;
+    return nameOnly || username;
+  })();
+
+  return (
+    <main className="mx-auto max-w-4xl px-4 py-10">
+      <div className="rounded-2xl border bg-white p-6 shadow-sm">
+        <div className="text-lg font-black text-slate-900">Confirmar reserva</div>
+
+        <div className="mt-4 rounded-2xl border border-slate-200 p-4">
+          <div className="text-xs font-extrabold text-slate-600">Ruta</div>
+          <div className="mt-1 text-xl font-black text-slate-900">
+            {trip.origin} → {trip.destination}
+          </div>
+
+          <div className="mt-3 text-sm font-semibold text-slate-800">
+            <span className="text-slate-500 font-bold">Organizador: </span>
+            <span className="font-extrabold text-slate-900">{organizerName}</span>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-extrabold text-slate-700">
+              {new Date(trip.date).toLocaleDateString("es-ES")}{trip.time ? ` · ${trip.time}` : ""}
+            </span>
+
+            <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-extrabold text-slate-700">
+              {trip.seatsAvailable} / {trip.seatsTotal} plazas
+            </span>
+
+            <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-extrabold text-slate-700">
+              {price} € / plaza
+            </span>
+          </div>
+
+          <div className="mt-4 rounded-2xl border border-slate-200 p-4">
+            <div className="text-xs font-extrabold text-slate-700">Punto de encuentro</div>
+            {trip.meetingPoint ? (
+              <div className="mt-1 text-sm font-semibold text-slate-900">{trip.meetingPoint}</div>
+            ) : (
+              <div className="mt-1 text-sm text-slate-500">No especificado</div>
+            )}
+
+            <div className="mt-4 grid gap-2">
+              <div className="text-sm font-semibold text-slate-800">
+                <span className="text-slate-500 font-bold">Equipo: </span>
+                <span className="text-slate-900">{trip.team}</span>
+              </div>
+              <div className="text-sm font-semibold text-slate-800">
+                <span className="text-slate-500 font-bold">Partido: </span>
+                <span className="text-slate-900">{trip.match}</span>
+              </div>
+              {trip.isBase ? (
+                <div className="text-sm font-semibold text-slate-800">
+                  <span className="text-slate-500 font-bold">Fútbol base: </span>
+                  <span className="text-slate-900">{trip.baseCategory || "Sí"}</span>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+
+        <form action="/api/reservations/create" method="post" className="mt-6">
+          <input type="hidden" name="tripId" value={params.id} />
+          <button className="w-full rounded-xl bg-black text-white px-4 py-3 font-bold hover:opacity-90">
+            Pagar · {price} €
+          </button>
+        </form>
+
+        <div className="mt-4 text-center">
+          <Link href={`/trips/${params.id}`} className="text-sm text-slate-700 hover:underline">
+            Volver al viaje
+          </Link>
+        </div>
+      </div>
+    </main>
+  );
+}

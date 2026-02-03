@@ -1,0 +1,56 @@
+"use client";
+
+import { useState } from "react";
+
+export default function ShareButtons({ url }: { url: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch {
+      // fallback muy simple
+      const el = document.createElement("textarea");
+      el.value = url;
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand("copy");
+      document.body.removeChild(el);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    }
+  }
+
+  const waHref = `https://wa.me/?text=${encodeURIComponent(url)}`;
+
+  return (
+    <div className="mt-4">
+      <div className="text-xs font-extrabold text-slate-700 mb-2">Compartir</div>
+
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={copy}
+          className="flex-1 rounded-xl border border-slate-300 bg-white px-4 py-3 font-extrabold text-slate-900 hover:bg-slate-50"
+        >
+          {copied ? "✅ Copiado" : "Copiar enlace"}
+        </button>
+
+        <a
+          href={waHref}
+          target="_blank"
+          rel="noreferrer"
+          className="flex-1 rounded-xl bg-black text-white px-4 py-3 font-extrabold text-center hover:opacity-90"
+        >
+          Compartir en WhatsApp
+        </a>
+      </div>
+
+      <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 break-all">
+        {url}
+      </div>
+    </div>
+  );
+}

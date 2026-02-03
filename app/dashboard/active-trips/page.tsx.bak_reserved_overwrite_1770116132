@@ -1,0 +1,200 @@
+import Link from "next/link";
+import { requireSession } from "@/lib/auth";
+import { dbConnect } from "@/lib/db";
+import { Reservation } from "@/models/Reservation";
+import { Trip } from "@/models/Trip";
+
+function initials(name?: string) {
+  const s = (name || "U").trim();
+  const parts = s.split(/\s+/).filter(Boolean);
+  const a = parts[0]?.[0] || "U";
+  const b = parts[1]?.[0] || "";
+  return (a + b).toUpperCase();
+}
+
+function OrganizerName(t: any) {
+  const c: any = (t as any)?.creator || (t as any)?.creatorId;
+  const username = (c?.username || "").trim() || "Usuario";
+  const accountType = (c?.accountType || "particular").trim();
+  const realName = (c?.name || "").trim();
+  const isOrgEntity = accountType === "club" || accountType === "pena";
+  return isOrgEntity ? username : (realName || username);
+}
+
+function TripCardRow({ t, badge }: { t: any; badge?: string }) {
+  const price = ((t.priceCents || 0) / 100).toFixed(2);
+  const creator = (t as any)?.creator || (t as any)?.creatorId;
+  const avatar = creator?.avatar || "";
+
+  return (
+    <Link
+      href={`/trips/${t._id}`}
+      className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm hover:bg-slate-50 block"
+    >
+      <div className="flex items-start gap-4">
+        <div className="h-12 w-12 shrink-0 overflow-hidden rounded-full border border-slate-200 bg-slate-100 flex items-center justify-center font-extrabold text-slate-700">
+          {avatar ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={avatar} alt="avatar" className="h-full w-full object-cover" />
+          ) : (
+            initials(creator?.username)
+          )}
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <div className="text-sm font-semibold text-slate-800">
+                  <span className="text-slate-500 font-bold">Organizador: </span>
+                  <span className="font-extrabold text-slate-900">{OrganizerName(t)}</span>
+                </div>
+
+                {badge ? (
+                  <span className="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-black text-emerald-800 border border-emerald-200">
+                    {badge}
+                  </span>
+                ) : null}
+              </div>
+
+              <div className="truncate text-base font-extrabold text-slate-900 mt-1">
+                {t.origin} → {t.destination}
+              </div>
+
+              <div className="mt-1 text-sm font-bold text-sky-700">
+                {new Date(t.date).toLocaleDateString("es-ES")}
+                {t.time ? ` · ${t.time}` : ""}
+              </div>
+
+              <div className="mt-1 text-sm font-semibold text-slate-800">
+                <span className="text-slate-500 font-bold">Equipo: </span>{t.team}
+              </div>
+
+              <div className="mt-1 text-sm font-semibold text-slate-700">
+                <span className="text-slate-500 font-bold">Partido: </span>{t.match}
+              </div>
+
+              {t.isBase ? (
+                <div className="mt-1 text-sm font-semibold text-slate-700">
+                  <span className="text-slate-500 font-bold">Fútbol base: </span>{t.baseCategory || "Sí"}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="text-right">
+              <div className="text-base font-extrabold text-teal-700">{price} €</div>
+              <div className="mt-1 text-sm font-bold text-teal-700">
+                {t.seatsAvailable}/{t.seatsTotal} plazas
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Link>
+  );
+}
+
+export default async function ActiveTripsPage() {
+  let session: any = null;
+  try {
+    session = await requireSession();
+  } catch {
+    return (
+      <main className="mx-auto max-w-6xl px-4 py-8">
+        <div className="rounded-2xl border bg-white p-6">
+          <div className="text-lg font-black text-slate-900">Necesitas iniciar sesión</div>
+          <div className="mt-4">
+            <Link className="rounded-xl bg-black text-white px-4 py-2 font-extrabold inline-block" href="/login">
+              Iniciar sesión
+            </Link>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  const userId =
+    session?.userId ||
+    session?.user?.id ||
+    session?.user?._id ||
+    session?.user?.userId ||
+    null;
+
+  if (!userId) {
+    return (
+      <main className="mx-auto max-w-6xl px-4 py-8">
+        <div className="rounded-2xl border bg-white p-6">
+          <div className="text-lg font-black text-slate-900">Sesión inválida</div>
+          <div className="mt-4">
+            <Link className="rounded-xl bg-black text-white px-4 py-2 font-extrabold inline-block" href="/login">
+              Iniciar sesión
+            </Link>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  await dbConnect();
+
+  // 1) Viajes publicados por ti
+  const myTrips = await Trip.find({ creatorId: userId, active: true }).sort({ date: 1 }).lean();
+
+  // 2) Viajes reservados por ti (pagados)
+  const reservedTripIds = await Reservation.find({ userId, status: "paid" }).distinct("tripId");
+  const reservedTrips = reservedTripIds?.length
+    ? await Trip.find({ _id: { $in: reservedTripIds }, active: true }).sort({ date: 1 }).lean()
+    : [];
+
+  // Para evitar duplicados (por si reservas un viaje tuyo, aunque lo bloqueamos)
+  const myTripIds = new Set((myTrips || []).map((t: any) => String(t._id)));
+  const reservedFiltered = (reservedTrips || []).filter((t: any) => !myTripIds.has(String(t._id)));
+
+  return (
+    <main className="mx-auto max-w-6xl px-4 py-8">
+      <div className="flex items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-black tracking-tight text-slate-900">Viajes activos</h1>
+          <div className="mt-1 text-sm font-bold text-slate-600">
+            Tus viajes publicados y tus reservas
+          </div>
+        </div>
+
+        <Link
+          href="/publish"
+          className="rounded-xl bg-black text-white px-4 py-2 font-extrabold hover:opacity-90"
+        >
+          Publicar viaje
+        </Link>
+      </div>
+
+      {/* Reservas */}
+      <div className="mt-6">
+        <div className="text-sm font-black text-slate-900">Reservas</div>
+        <div className="mt-3 grid gap-3">
+          {reservedFiltered.length ? (
+            reservedFiltered.map((t: any) => <TripCardRow key={String(t._id)} t={t} badge="RESERVADO" />)
+          ) : (
+            <div className="rounded-2xl border border-slate-200 bg-white p-6 text-slate-700">
+              Aún no tienes reservas.
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Publicados */}
+      <div className="mt-8">
+        <div className="text-sm font-black text-slate-900">Publicados por ti</div>
+        <div className="mt-3 grid gap-3">
+          {myTrips.length ? (
+            myTrips.map((t: any) => <TripCardRow key={String(t._id)} t={t} />)
+          ) : (
+            <div className="rounded-2xl border border-slate-200 bg-white p-6 text-slate-700">
+              Aún no has publicado viajes.
+            </div>
+          )}
+        </div>
+      </div>
+    </main>
+  );
+}

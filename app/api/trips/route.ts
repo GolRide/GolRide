@@ -1,144 +1,133 @@
-import "@/models/User";
 import { NextResponse } from "next/server";
-import { dbConnect } from "@/lib/db";
+import dbConnect from "@/lib/dbConnect";
 import { Trip } from "@/models/Trip";
-import { getSession } from "@/lib/auth";
+import User from "@/models/User"; // registra el modelo para populate
+import { requireSession } from "@/lib/auth";
 
+// GET /api/trips  -> lista viajes (para /trips y búsquedas)
 export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
+  try {
+    await dbConnect();
 
-  const origin = (searchParams.get("origin") || "").trim();
-  const destination = (searchParams.get("destination") || "").trim();
-  const team = (searchParams.get("team") || "").trim();
-  const dateStr = (searchParams.get("date") || "").trim();
+    const { searchParams } = new URL(req.url);
 
-  await dbConnect();
+    const origin = (searchParams.get("origin") || "").trim();
+    const destination = (searchParams.get("destination") || "").trim();
+    const team = (searchParams.get("team") || "").trim();
+    const date = (searchParams.get("date") || "").trim();
 
-  const filter: any = { active: true };
+    const query: any = { active: true };
 
-  if (origin) filter.origin = new RegExp(origin, "i");
-  if (destination) filter.destination = new RegExp(destination, "i");
-  if (team) filter.team = new RegExp(team, "i");
+    if (origin) query.origin = { $regex: origin, $options: "i" };
+    if (destination) query.destination = { $regex: destination, $options: "i" };
 
-  if (dateStr) {
-    const start = new Date(dateStr);
-    if (!Number.isNaN(start.getTime())) {
-      const end = new Date(start);
-      end.setUTCDate(end.getUTCDate() + 1);
-      filter.date = { $gte: start, $lt: end };
+    // ✅ ventana de fecha: día anterior, mismo día y día siguiente
+    if (date) {
+      const d = new Date(date);
+
+      const from = new Date(d);
+      from.setDate(from.getDate() - 1);
+      from.setHours(0, 0, 0, 0);
+
+      const to = new Date(d);
+      to.setDate(to.getDate() + 1);
+      to.setHours(23, 59, 59, 999);
+
+      query.date = { $gte: from, $lte: to };
     }
+
+    if (team) {
+      query.$or = [
+        { team: { $regex: team, $options: "i" } },
+        { match: { $regex: team, $options: "i" } },
+      ];
+    }
+
+    const raw = await Trip.find(query)
+      // ✅ trae los datos reales del usuario que publica
+      .populate({ path: "creatorId", model: User, select: "username avatar accountType name surnames" })
+      .sort({ date: 1, time: 1, createdAt: -1 })
+      .limit(200)
+      .lean();
+
+    // ✅ alias: el front usa t.creator.*, así que lo devolvemos
+    const trips = raw.map((t: any) => ({
+      ...t,
+      creator: t.creatorId || null,
+    }));
+
+    return NextResponse.json({ ok: true, trips }, { status: 200 });
+  } catch (e: any) {
+    console.error("GET /api/trips error:", e);
+    return NextResponse.json(
+      { ok: false, error: e?.message ?? "Error listando viajes" },
+      { status: 500 }
+    );
   }
+}
 
-  const trips = await Trip.find(filter)
-    .sort({ date: 1 })
-    .limit(100)
-    .populate("creatorId", "username avatar")
-    .lean();
-
-  const shaped = trips.map((t: any) => ({
-    _id: String(t._id),
-    origin: t.origin,
-    destination: t.destination,
-    date: t.date,
-    time: t.time || "",
-    time: t.time || "",
-    match: t.match,
-    team: t.team,
-    seatsAvailable: t.seatsAvailable,
-    seatsTotal: t.seatsTotal,
-    priceCents: t.priceCents,
-    contactPreference: t.contactPreference,
-    meetingPoint,
-    meetingPoint: t.meetingPoint || "",
-    creator: {
-      username: t.creatorId?.username || "Usuario",
-      avatar: t.creatorId?.avatar || "",
-    },
-  }));
-
-  return NextResponse.json({ trips: shaped });
+// POST /api/trips -> crea viaje (protegido)
+function getUserId(session: any): string | null {
+  return (
+    session?.user?.id ||
+    session?.user?._id ||
+    session?.userId ||
+    session?.id ||
+    null
+  );
 }
 
 export async function POST(req: Request) {
-  await dbConnect();
-
-  const session = await getSession();
-  if (!session) {
-    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
-  }
-
-  let body: any = {};
   try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "invalid_json" }, { status: 400 });
+    await dbConnect();
+
+    const session = await requireSession();
+    const userId = getUserId(session);
+
+    if (!userId) {
+      return NextResponse.json({ ok: false, error: "UNAUTHENTICATED" }, { status: 401 });
+    }
+
+    const body = await req.json();
+    const seatsTotal = Number(body.seatsTotal ?? 0);
+    const clientRequestId = body?.clientRequestId ? String(body.clientRequestId) : null;
+
+    const doc = {
+      ...body,
+      creatorId: userId,
+      seatsAvailable: body.seatsAvailable ?? seatsTotal,
+      meetingPoint: body.meetingPoint ?? "",
+      clientRequestId,
+    };
+
+    // ✅ idempotencia robusta
+    if (clientRequestId) {
+      try {
+        const trip = await Trip.create(doc);
+        return NextResponse.json({ ok: true, id: String(trip._id), trip, duplicated: false }, { status: 201 });
+      } catch (e: any) {
+        // Si entran 2 POST casi a la vez con el mismo clientRequestId, el índice único salta
+        if (String(e?.code) === "11000") {
+          const existing = await Trip.findOne({ creatorId: userId, clientRequestId }).lean();
+          if (existing) {
+            return NextResponse.json(
+              { ok: true, id: String(existing._id), trip: existing, duplicated: true },
+              { status: 200 }
+            );
+          }
+        }
+        throw e;
+      }
+    }
+
+    // Si no viene clientRequestId, comportamiento normal
+    const trip = await Trip.create(doc);
+    return NextResponse.json({ ok: true, id: String(trip._id), trip }, { status: 201 });
+  } catch (e: any) {
+    console.error("POST /api/trips error:", e);
+    return NextResponse.json(
+      { ok: false, error: e?.message ?? "Error creando viaje" },
+      { status: 500 }
+    );
   }
-
-  const origin = String(body.origin || "").trim();
-  const destination = String(body.destination || "").trim();
-  const match = String(body.match || "").trim();
-  const team = String(body.team || "").trim();
-  const dateStr = String(body.date || "").trim();
-
-  // ✅ NUEVO
-  const time = String(body.time || "").trim(); // "HH:mm"
-  const meetingPoint = String(body.meetingPoint || "").trim(); // opcional
-
-  const contactPreference = String(body.contactPreference || "").trim();
-  const priceCents = Number(body.priceCents);
-  const seatsTotal = Number(body.seatsTotal);
-
-  if (!origin || !destination || !match || !team || !dateStr || !time) {
-    return NextResponse.json({ error: "missing_fields" }, { status: 400 });
-  }
-
-  if (!/^\d{2}:\d{2}$/.test(time)) {
-    return NextResponse.json({ error: "invalid_time" }, { status: 400 });
-  }
-
-  if (!Number.isFinite(seatsTotal) || seatsTotal < 1 || seatsTotal > 60) {
-    return NextResponse.json({ error: "invalid_seatsTotal" }, { status: 400 });
-  }
-
-  if (!Number.isFinite(priceCents) || priceCents < 0 || priceCents > 50000) {
-    return NextResponse.json({ error: "invalid_priceCents" }, { status: 400 });
-  }
-
-  if (contactPreference !== "whatsapp" && contactPreference !== "email") {
-    return NextResponse.json({ error: "invalid_contactPreference" }, { status: 400 });
-  }
-
-  const date = new Date(dateStr);
-  if (Number.isNaN(date.getTime())) {
-    return NextResponse.json({ error: "invalid_date" }, { status: 400 });
-  }
-
-  // Bloquear fechas pasadas (día completo)
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const tripDay = new Date(date);
-  tripDay.setHours(0, 0, 0, 0);
-
-  if (tripDay < today) {
-    return NextResponse.json({ error: "date_in_past" }, { status: 400 });
-  }
-
-  const doc = await Trip.create({
-    creatorId: session.userId,
-    origin,
-    destination,
-    date,
-    time,
-    match,
-    team,
-    seatsTotal,
-    seatsAvailable: seatsTotal,
-    priceCents,
-    contactPreference,
-    meetingPoint, // opcional
-    active: true,
-  });
-
-  return NextResponse.json({ ok: true, id: String(doc._id) }, { status: 201 });
 }

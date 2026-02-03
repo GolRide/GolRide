@@ -1,42 +1,48 @@
 import { NextResponse } from "next/server";
 import { dbConnect } from "@/lib/db";
 import User from "@/models/User";
-import { createSessionToken, setSessionCookie } from "@/lib/auth";
-import { sendWelcomeEmail } from "@/lib/email";
 
 export async function POST(req: Request) {
-  const form = await req.formData();
-  const email = String(form.get("email") || "").trim().toLowerCase();
-  const code = String(form.get("code") || "").trim();
+  try {
+    const body = await req.json();
+    const email = String(body?.email || "").trim().toLowerCase();
+    const code = String(body?.code || "").trim();
 
-  await dbConnect();
-  const user: any = await User.findOne({ email });
-  if (!user) return NextResponse.redirect(new URL("/verify?error=not_found", req.url));
+    if (!email || !code) {
+      return NextResponse.json({ error: "Faltan datos" }, { status: 400 });
+    }
 
-  const exp = user.verificationExpiresAt ? new Date(user.verificationExpiresAt).getTime() : 0;
-  const now = Date.now();
-  if (user.verified) {
-    const token = createSessionToken({ userId: String(user._id), email: user.email, username: user.username, verified: true });
-    setSessionCookie(token);
-    return NextResponse.redirect(new URL("/dashboard/profile", req.url));
+    await dbConnect();
+
+    const user = await User.findOne({ email });
+    if (!user) {
+      return NextResponse.json({ error: "Usuario no existe" }, { status: 404 });
+    }
+
+    if (user.verified) {
+      return NextResponse.json({ ok: true, message: "Ya verificado" });
+    }
+
+    if (!user.verificationCode || !user.verificationExpiresAt) {
+      return NextResponse.json({ error: "No hay código activo" }, { status: 400 });
+    }
+
+    if (new Date(user.verificationExpiresAt).getTime() < Date.now()) {
+      return NextResponse.json({ error: "Código caducado" }, { status: 400 });
+    }
+
+    if (String(user.verificationCode) !== String(code)) {
+      return NextResponse.json({ error: "Código incorrecto" }, { status: 400 });
+    }
+
+    user.verified = true;
+    user.verificationCode = undefined;
+    user.verificationExpiresAt = undefined;
+    await user.save();
+
+    return NextResponse.json({ ok: true, message: "Email verificado ✅" });
+  } catch (e) {
+    console.error(e);
+    return NextResponse.json({ error: "Error verificando" }, { status: 500 });
   }
-
-  if (!user.verificationCode || user.verificationCode !== code || (exp && now > exp)) {
-    return NextResponse.redirect(new URL(`/verify?email=${encodeURIComponent(email)}&error=invalid`, req.url));
-  }
-
-  user.verified = true;
-  user.verificationCode = "";
-  await user.save();
-
-try {
-  await sendWelcomeEmail(user.email, user.name);
-} catch (e) {
-  console.error("[SMTP] Fallo enviando bienvenida:", e);
-}
-
-  const token = createSessionToken({ userId: String(user._id), email: user.email, username: user.username, verified: true });
-  setSessionCookie(token);
-
-  return NextResponse.redirect(new URL("/dashboard/profile", req.url));
 }

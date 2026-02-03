@@ -1,0 +1,68 @@
+import { NextResponse } from "next/server";
+import dbConnect from "@/lib/dbConnect";
+import { Trip } from "@/models/Trip";
+import { requireSession } from "@/lib/auth";
+
+// GET /api/trips  -> lista viajes (para /trips y búsquedas)
+// GET /api/trips  -> lista viajes (para /trips y búsquedas)
+export async function GET() {
+  try {
+    await dbConnect();
+
+    const trips = await Trip.find({ active: true })
+      .sort({ date: 1, time: 1, createdAt: -1 })
+      .limit(200)
+      .lean();
+
+    return NextResponse.json({ ok: true, trips }, { status: 200 });
+  } catch (e: any) {
+    console.error("GET /api/trips error:", e);
+    return NextResponse.json(
+      { ok: false, error: e?.message ?? "Error listando viajes" },
+      { status: 500 }
+    );
+  }
+}
+
+// POST /api/trips -> crea viaje (protegido)
+function getUserId(session: any): string | null {
+  return (
+    session?.user?.id ||
+    session?.user?._id ||
+    session?.userId ||
+    session?.id ||
+    null
+  );
+}
+
+export async function POST(req: Request) {
+  try {
+    await dbConnect();
+
+    const session = await requireSession();
+    const userId = getUserId(session);
+
+    if (!userId) {
+      return NextResponse.json({ ok: false, error: "UNAUTHENTICATED" }, { status: 401 });
+    }
+
+    const body = await req.json();
+
+    const seatsTotal = Number(body.seatsTotal ?? 0);
+
+    const trip = await Trip.create({
+      ...body,
+      creatorId: userId,
+      seatsAvailable: body.seatsAvailable ?? seatsTotal,
+      meetingPoint: body.meetingPoint ?? "",
+    });
+
+    return NextResponse.json({ ok: true, id: String(trip._id), trip }, { status: 201 });
+  } catch (e: any) {
+    console.error("POST /api/trips error:", e);
+    return NextResponse.json(
+      { ok: false, error: e?.message ?? "Error creando viaje" },
+      { status: 500 }
+    );
+  }
+}

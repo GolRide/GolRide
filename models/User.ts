@@ -14,6 +14,10 @@ const UserSchema = new Schema(
     verificationCode: { type: String },
     verificationExpiresAt: { type: Date },
 
+
+    resetPasswordTokenHash: { type: String },
+    resetPasswordExpiresAt: { type: Date },
+
     username: { type: String, default: "" },
     avatar: { type: String, default: "" },
     team: { type: String, default: "" },

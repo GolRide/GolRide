@@ -1,0 +1,109 @@
+import { NextResponse } from "next/server";
+import dbConnect from "@/lib/dbConnect";
+import { Trip } from "@/models/Trip";
+import { requireSession } from "@/lib/auth";
+
+// GET /api/trips  -> lista viajes (para /trips y búsquedas)
+// GET /api/trips  -> lista viajes (para /trips y búsquedas)
+export async function GET() {
+  try {
+    await dbConnect();
+
+    const trips = await Trip.find({ active: true })
+      .sort({ date: 1, time: 1, createdAt: -1 })
+      .limit(200)
+      .lean();
+
+    return NextResponse.json({ ok: true, trips }, { status: 200 });
+  } catch (e: any) {
+    // Si entran dos POST casi a la vez, el índice único puede saltar: E11000
+    if (String(e?.code) === "11000") {
+      try {
+        const body = await req.json().catch(() => null);
+        const clientRequestId = body?.clientRequestId ? String(body.clientRequestId) : null;
+        const session = await requireSession();
+        const userId = (session as any)?.user?.id || (session as any)?.user?._id || (session as any)?.userId || (session as any)?.id;
+        if (userId && clientRequestId) {
+          const existing = await Trip.findOne({ creatorId: userId, clientRequestId }).lean();
+          if (existing) {
+            return NextResponse.json(
+              { ok: true, id: String(existing._id), trip: existing, duplicated: true },
+              { status: 200 }
+            );
+          }
+        }
+      } catch {}
+    }
+    console.error("GET /api/trips error:", e);
+    return NextResponse.json(
+      { ok: false, error: e?.message ?? "Error listando viajes" },
+      { status: 500 }
+    );
+  }
+}
+
+// POST /api/trips -> crea viaje (protegido)
+function getUserId(session: any): string | null {
+  return (
+    session?.user?.id ||
+    session?.user?._id ||
+    session?.userId ||
+    session?.id ||
+    null
+  );
+}
+
+export async function POST(req: Request) {
+  try {
+    await dbConnect();
+
+    const session = await requireSession();
+    const userId = getUserId(session);
+
+    if (!userId) {
+      return NextResponse.json({ ok: false, error: "UNAUTHENTICATED" }, { status: 401 });
+    }
+
+    const body = await req.json();
+    const seatsTotal = Number(body.seatsTotal ?? 0);
+
+    // ✅ idempotencia: si el cliente manda el mismo clientRequestId 2 veces, solo se crea 1 viaje
+    const clientRequestId = body?.clientRequestId ? String(body.clientRequestId) : null;
+
+    const docToInsert = {
+      ...body,
+      creatorId: userId,
+      seatsAvailable: body.seatsAvailable ?? seatsTotal,
+      meetingPoint: body.meetingPoint ?? "",
+      clientRequestId,
+    };
+
+    if (clientRequestId) {
+      // upsert atómico: si existe, no crea duplicado
+      const raw = await Trip.findOneAndUpdate(
+        { creatorId: userId, clientRequestId },
+        { $setOnInsert: docToInsert },
+        { upsert: true, new: true, rawResult: true }
+      );
+
+      const trip = raw?.value;
+      const existed = Boolean(raw?.lastErrorObject?.updatedExisting);
+
+      return NextResponse.json(
+        { ok: true, id: String(trip._id), trip, duplicated: existed },
+        { status: existed ? 200 : 201 }
+      );
+    }
+
+    // Si no viene clientRequestId, comportamiento normal (puede duplicar si llegan dos requests)
+    const trip = await Trip.create(docToInsert);
+    return NextResponse.json({ ok: true, id: String(trip._id), trip }, { status: 201 });
+
+  } catch (e: any) {
+    console.error("POST /api/trips error:", e);
+    return NextResponse.json(
+      { ok: false, error: e?.message ?? "Error creando viaje" },
+      { status: 500 }
+    );
+  }
+}

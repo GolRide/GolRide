@@ -1,34 +1,109 @@
-import "@/models/User";
 import { NextResponse } from "next/server";
-import { dbConnect } from "@/lib/db";
+import dbConnect from "@/lib/dbConnect";
 import { Trip } from "@/models/Trip";
+import User from "@/models/User"; // registra el modelo para populate
+import { requireSession } from "@/lib/auth";
 
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
-  await dbConnect();
+function getUserId(session: any): string | null {
+  return (
+    session?.user?.id ||
+    session?.user?._id ||
+    session?.userId ||
+    session?.id ||
+    null
+  );
+}
 
-  const t: any = await Trip.findById(params.id)
-    .populate("creatorId", "username avatar")
-    .lean();
+export async function GET(_req: Request, ctx: { params: { id: string } }) {
+  try {
+    await dbConnect();
+    const trip = await Trip.findById(ctx.params.id)
+      .populate({ path: "creatorId", model: User, select: "username avatar accountType name surnames" })
+      .lean();
+    if (!trip) return NextResponse.json({ ok: false, error: "not_found" }, { status: 404 });
+    return NextResponse.json({ ok: true, trip: { ...(trip as any), creator: (trip as any).creatorId || null } }, { status: 200 });
+  } catch (e: any) {
+    console.error("GET /api/trips/[id] error:", e);
+    return NextResponse.json({ ok: false, error: e?.message ?? "error" }, { status: 500 });
+  }
+}
 
-  if (!t) return NextResponse.json({ error: "not_found" }, { status: 404 });
+export async function PATCH(req: Request, ctx: { params: { id: string } }) {
+  try {
+    await dbConnect();
 
-  return NextResponse.json({
-    _id: String(t._id),
-    origin: t.origin,
-    destination: t.destination,
-    date: t.date,
-    match: t.match,
-    team: t.team,
-    seatsTotal: t.seatsTotal,
-    seatsAvailable: t.seatsAvailable,
-    priceCents: t.priceCents,
-    contactPreference: t.contactPreference,
-    active: t.active,
-    createdAt: t.createdAt,
-    updatedAt: t.updatedAt,
-    creator: {
-      username: t.creatorId?.username || "Usuario",
-      avatar: t.creatorId?.avatar || "",
-    },
-  });
+    const session = await requireSession();
+    const userId = getUserId(session);
+    if (!userId) return NextResponse.json({ ok: false, error: "UNAUTHENTICATED" }, { status: 401 });
+
+    const trip = await Trip.findById(ctx.params.id);
+    if (!trip) return NextResponse.json({ ok: false, error: "not_found" }, { status: 404 });
+
+    if (String(trip.creatorId) !== String(userId)) {
+      return NextResponse.json({ ok: false, error: "FORBIDDEN" }, { status: 403 });
+    }
+
+    const body = await req.json();
+
+    const up: any = {};
+    const allowed = [
+      "origin",
+      "destination",
+      "date",
+      "time",
+      "meetingPoint",
+      "match",
+      "team",
+      "seatsTotal",
+      "priceCents",
+      "contactPreference",
+      "transport",
+      "baseCategory",
+      "isBase",
+      "active",
+    ];
+
+    for (const k of allowed) {
+      if (body[k] !== undefined) up[k] = body[k];
+    }
+
+    // Si desmarcan fútbol base, limpiamos la categoría
+    if (up.isBase === false) up.baseCategory = null;
+
+    // Recalcular seatsAvailable si cambian seatsTotal (manteniendo reservas hechas)
+    if (up.seatsTotal !== undefined) {
+      const newTotal = Number(up.seatsTotal);
+      const taken = Number(trip.seatsTotal) - Number(trip.seatsAvailable);
+      up.seatsAvailable = Math.max(0, newTotal - taken);
+    }
+
+    const updated = await Trip.findByIdAndUpdate(ctx.params.id, up, { new: true }).lean();
+    return NextResponse.json({ ok: true, trip: updated }, { status: 200 });
+  } catch (e: any) {
+    console.error("PATCH /api/trips/[id] error:", e);
+    return NextResponse.json({ ok: false, error: e?.message ?? "error" }, { status: 500 });
+  }
+}
+
+export async function DELETE(_req: Request, ctx: { params: { id: string } }) {
+  try {
+    await dbConnect();
+
+    const session = await requireSession();
+    const userId = getUserId(session);
+    if (!userId) return NextResponse.json({ ok: false, error: "UNAUTHENTICATED" }, { status: 401 });
+
+    const trip = await Trip.findById(ctx.params.id);
+    if (!trip) return NextResponse.json({ ok: false, error: "not_found" }, { status: 404 });
+
+    if (String(trip.creatorId) !== String(userId)) {
+      return NextResponse.json({ ok: false, error: "FORBIDDEN" }, { status: 403 });
+    }
+
+    await Trip.deleteOne({ _id: ctx.params.id });
+    return NextResponse.json({ ok: true }, { status: 200 });
+  } catch (e: any) {
+    console.error("DELETE /api/trips/[id] error:", e);
+    return NextResponse.json({ ok: false, error: e?.message ?? "error" }, { status: 500 });
+  }
 }
